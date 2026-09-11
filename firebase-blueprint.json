@@ -1,0 +1,33 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "A checklist task or record",
+      "type": "object",
+      "properties": {
+        "stt": { "type": "number" },
+        "project": { "type": "string", "maxLength": 100 },
+        "taskName": { "type": "string", "maxLength": 200 },
+        "handler": { "type": "string", "maxLength": 100 },
+        "priority": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "completionDate": { "type": "string" },
+        "dropped": { "type": "boolean" },
+        "files": { "type": "string" },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["project", "taskName", "userId"]
+    }
+  },
+  "firestore": {
+    "/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Stores user tasks"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Checklist Management",
+  "description": "Quản lý công việc, tự động cập nhật Google Sheets, lọc tìm kiếm, thông báo hạn xử lý và phân công cán bộ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
