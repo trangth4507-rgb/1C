@@ -182,9 +182,9 @@ export default function App() {
     }
   };
 
-  const triggerGoogleSheetPull = async () => {
+  const triggerGoogleSheetPull = async (silent = false) => {
     if (!sheetConfig.webAppUrl) {
-      showToast('Vui lòng nhập WebApp URL để lấy dữ liệu.');
+      if (!silent) showToast('Vui lòng nhập WebApp URL để lấy dữ liệu.');
       return;
     }
     
@@ -197,20 +197,71 @@ export default function App() {
           ...prev,
           lastSyncedAt: new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN'),
         }));
-        showToast(`Đã lấy thành công ${data.tasks.length} hồ sơ từ Google Sheet!`);
+        if (!silent) showToast(`Đã lấy thành công ${data.tasks.length} hồ sơ từ Google Sheet!`);
       } else {
-        showToast(data.error || 'Lấy dữ liệu thất bại.');
+        if (!silent) showToast(data.error || 'Lấy dữ liệu thất bại.');
       }
     } catch (err) {
       console.error('Pull failed', err);
-      showToast('Lỗi kết nối khi lấy dữ liệu từ Google Sheet.');
+      if (!silent) showToast('Lỗi kết nối khi lấy dữ liệu từ Google Sheet.');
     }
   };
 
+  // Auto Pull from Google Sheets periodically if Auto Sync is enabled
+  useEffect(() => {
+    if (sheetConfig.autoSyncEnabled && sheetConfig.webAppUrl) {
+      // Pull immediately on load
+      triggerGoogleSheetPull(true);
+
+      // Poll every 1 minute to check for updates from Google Sheet
+      const pollInterval = setInterval(() => {
+        if (!document.hidden) {
+          triggerGoogleSheetPull(true);
+        }
+      }, 60000);
+
+      // Also pull when window regains focus
+      const handleFocus = () => triggerGoogleSheetPull(true);
+      window.addEventListener('focus', handleFocus);
+
+      return () => {
+        clearInterval(pollInterval);
+        window.removeEventListener('focus', handleFocus);
+      };
+    }
+  }, [sheetConfig.autoSyncEnabled, sheetConfig.webAppUrl]);
+
   // Auto Sync trigger on task mutation if enabled
-  const triggerAutoSyncIfEnabled = () => {
+  const triggerAutoSyncIfEnabled = (updatedTasks: Task[]) => {
     if (sheetConfig.autoSyncEnabled) {
-      triggerGoogleSheetSync();
+      // Need to use the updatedTasks explicitly instead of the closure tasks
+      setIsSyncing(true);
+      fetch('/api/sheets/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tasks: updatedTasks,
+          spreadsheetId: sheetConfig.spreadsheetId,
+          sheetName: sheetConfig.sheetName,
+          webAppUrl: sheetConfig.webAppUrl,
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.success) {
+            setSheetConfig((prev) => ({
+              ...prev,
+              lastSyncedAt: new Date().toLocaleTimeString('vi-VN') + ' ' + new Date().toLocaleDateString('vi-VN'),
+            }));
+            // showToast('Đã đồng bộ tự động lên Google Sheets!');
+          }
+        })
+        .catch((err) => {
+          console.error('Auto Sync failed', err);
+        })
+        .finally(() => {
+          setIsSyncing(false);
+        });
     }
   };
 
@@ -227,10 +278,23 @@ export default function App() {
     return Array.from(set).sort();
   }, [tasks]);
 
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'WARNINGS' | 'ACTIVE' | 'COMPLETED'>('WARNINGS');
+
   // Filter & Search Logic
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const metrics = calculateTaskMetrics(task, currentDate);
+
+      // Tab Filtering
+      if (activeTab === 'WARNINGS') {
+        if (task.completed || task.dropped) return false;
+        if (metrics.status !== 'OVERDUE' && metrics.status !== 'DUE_SOON_1' && metrics.status !== 'DUE_SOON_2') return false;
+      } else if (activeTab === 'ACTIVE') {
+        if (task.completed || task.dropped) return false;
+      } else if (activeTab === 'COMPLETED') {
+        if (!task.completed && !task.dropped) return false;
+      }
 
       // Search Query
       if (filterState.searchQuery) {
@@ -274,15 +338,14 @@ export default function App() {
 
       return true;
     });
-  }, [tasks, filterState, currentDate]);
+  }, [tasks, filterState, currentDate, activeTab]);
 
   // Task Actions
   const handleCreateOrUpdateTask = (taskData: Omit<Task, 'id' | 'stt'> & { id?: string }) => {
+    let updatedTasks: Task[];
     if (taskData.id) {
       // Update existing
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskData.id ? ({ ...t, ...taskData } as Task) : t))
-      );
+      updatedTasks = tasks.map((t) => (t.id === taskData.id ? ({ ...t, ...taskData } as Task) : t));
       showToast('Đã cập nhật thông tin hồ sơ thành công!');
     } else {
       // Create new
@@ -291,44 +354,44 @@ export default function App() {
         id: `task-${Date.now()}`,
         stt: tasks.length + 1,
       };
-      setTasks((prev) => [...prev, newTask]);
+      updatedTasks = [...tasks, newTask];
       showToast('Đã thêm hồ sơ công việc mới!');
     }
-    triggerAutoSyncIfEnabled();
+    setTasks(updatedTasks);
+    triggerAutoSyncIfEnabled(updatedTasks);
   };
 
   const handleToggleComplete = (taskId: string) => {
     const today = getTodayIsoDate();
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === taskId) {
-          const nextCompleted = !t.completed;
-          return {
-            ...t,
-            completed: nextCompleted,
-            completionDate: nextCompleted ? today : undefined,
-          };
-        }
-        return t;
-      })
-    );
+    const updatedTasks = tasks.map((t) => {
+      if (t.id === taskId) {
+        const nextCompleted = !t.completed;
+        return {
+          ...t,
+          completed: nextCompleted,
+          completionDate: nextCompleted ? today : undefined,
+        };
+      }
+      return t;
+    });
+    setTasks(updatedTasks);
     showToast('Đã cập nhật tiến độ công việc!');
-    triggerAutoSyncIfEnabled();
+    triggerAutoSyncIfEnabled(updatedTasks);
   };
 
   const handleToggleDropped = (taskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, dropped: !t.dropped } : t))
-    );
+    const updatedTasks = tasks.map((t) => (t.id === taskId ? { ...t, dropped: !t.dropped } : t));
+    setTasks(updatedTasks);
     showToast('Đã thay đổi trạng thái tạm dừng công việc!');
-    triggerAutoSyncIfEnabled();
+    triggerAutoSyncIfEnabled(updatedTasks);
   };
 
   const handleDeleteTask = (taskId: string) => {
     if (confirm('Bạn có chắc chắn muốn xóa hồ sơ công việc này?')) {
-      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      const updatedTasks = tasks.filter((t) => t.id !== taskId);
+      setTasks(updatedTasks);
       showToast('Đã xóa công việc khỏi danh sách!');
-      triggerAutoSyncIfEnabled();
+      triggerAutoSyncIfEnabled(updatedTasks);
     }
   };
 
@@ -341,9 +404,10 @@ export default function App() {
       stt: startingStt + index,
     }));
 
-    setTasks((prev) => [...prev, ...formattedNewTasks]);
+    const updatedTasks = [...tasks, ...formattedNewTasks];
+    setTasks(updatedTasks);
     showToast(`Đã import thành công ${newTasksData.length} hồ sơ mới nối tiếp vào danh sách!`);
-    triggerAutoSyncIfEnabled();
+    triggerAutoSyncIfEnabled(updatedTasks);
   };
 
   // Export to Excel (.xlsx)
@@ -419,6 +483,34 @@ export default function App() {
           totalResults={filteredTasks.length}
           totalTasks={tasks.length}
         />
+
+        {/* Navigation Tabs */}
+        <div className="flex flex-wrap items-center gap-2 mb-4 bg-white p-1.5 rounded-xl border border-slate-200 shadow-sm w-fit">
+          <button
+            onClick={() => setActiveTab('WARNINGS')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+              activeTab === 'WARNINGS' ? 'bg-amber-100 text-amber-800' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            ⚠️ Cảnh báo đến hạn
+          </button>
+          <button
+            onClick={() => setActiveTab('ACTIVE')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+              activeTab === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            📋 Tất cả đang xử lý
+          </button>
+          <button
+            onClick={() => setActiveTab('COMPLETED')}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
+              activeTab === 'COMPLETED' ? 'bg-blue-100 text-blue-800' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            ✅ Đã xử lý / Tạm dừng
+          </button>
+        </div>
 
         {/* Export & Action Sub-Bar */}
         <div className="flex items-center justify-between text-xs px-1">

@@ -240,10 +240,12 @@ function doPost(e) {
       
       var startRow = 15;
       
-      // Clear old data values (Cột A - I) để tránh dữ liệu cũ sót lại
+      // Xóa hoàn toàn dữ liệu cũ (Tất cả 15 cột bao gồm Checkbox và Công thức)
       var lastRow = Math.max(14, sheet.getLastRow());
       if (lastRow > 14) {
-        sheet.getRange(startRow, 1, lastRow - 14, 9).clearContent();
+        var clearRange = sheet.getRange(startRow, 1, lastRow - 14, 15);
+        clearRange.clearContent();
+        clearRange.removeCheckboxes();
       }
       
       // Update new data
@@ -259,14 +261,22 @@ function doPost(e) {
         sheet.getRange(r, 8).setValue(t.startDate ? new Date(t.startDate) : "");
         sheet.getRange(r, 9).setValue(t.endDate ? new Date(t.endDate) : "");
         
-        // Cột J là Tick
-        var currentTick = sheet.getRange(r, 10).getValue();
-        if (t.completed !== currentTick) {
-          sheet.getRange(r, 10).setValue(t.completed);
-          if (t.completed && t.completionDate) {
-            sheet.getRange(r, 11).setValue(new Date(t.completionDate));
-          }
+        // Tạo lại Checkbox Tiến độ Tick (Cột J)
+        sheet.getRange(r, 10).insertCheckboxes();
+        sheet.getRange(r, 10).setValue(t.completed);
+        
+        if (t.completed && t.completionDate) {
+          sheet.getRange(r, 11).setValue(new Date(t.completionDate));
         }
+
+        // Tạo lại công thức Cột M, N, O
+        var fM = '=IF(OR(ISBLANK(H' + r + '), ISBLANK(I' + r + ')), "", IF(J' + r + '=TRUE, IF(ISBLANK(K' + r + '), I' + r + '-H' + r + '+1, K' + r + '-H' + r + '+1), I' + r + '-H' + r + '+1))';
+        var fN = '=IF(J' + r + '=TRUE, "Đã xong", IF(ISBLANK(I' + r + '), "", I' + r + '-TODAY()))';
+        var fO = '=IF(J' + r + '=TRUE, IF(IF(ISBLANK(K' + r + '), TODAY(), K' + r + ')<=I' + r + ', "🟢 Đúng hạn", "🔴 Trễ hạn"), IF(ISBLANK(I' + r + '), "⚪ Chưa có hạn", IF(I' + r + '-TODAY()<0, "🔴 Quá hạn", IF(I' + r + '-TODAY()<=2, "🟠 Sắp đến hạn", "🟢 Đúng hạn"))))';
+        
+        sheet.getRange(r, 13).setFormula(fM);
+        sheet.getRange(r, 14).setFormula(fN);
+        sheet.getRange(r, 15).setFormula(fO);
       }
       
       return ContentService.createTextOutput(JSON.stringify({
