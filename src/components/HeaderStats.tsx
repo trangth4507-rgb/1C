@@ -5,6 +5,7 @@ import { AlertTriangle, Clock, CheckCircle2, ShieldAlert, FileSpreadsheet, Bell,
 
 interface HeaderStatsProps {
   tasks: Task[];
+  currentDate: string;
   onOpenNewTaskModal: () => void;
   onOpenImportModal: () => void;
   onOpenGoogleSheetModal: () => void;
@@ -15,6 +16,7 @@ interface HeaderStatsProps {
 
 export const HeaderStats: React.FC<HeaderStatsProps> = ({
   tasks,
+  currentDate,
   onOpenNewTaskModal,
   onOpenImportModal,
   onOpenGoogleSheetModal,
@@ -29,7 +31,7 @@ export const HeaderStats: React.FC<HeaderStatsProps> = ({
   let taskHoanThanh = 0; // Completed
 
   tasks.forEach((task) => {
-    const metrics = calculateTaskMetrics(task);
+    const metrics = calculateTaskMetrics(task, currentDate);
     if (task.completed) {
       taskHoanThanh++;
     } else if (task.dropped) {

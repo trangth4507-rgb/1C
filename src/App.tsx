@@ -10,11 +10,7 @@ import { TaskModal } from './components/TaskModal';
 import { ImportModal } from './components/ImportModal';
 import { NotificationModal } from './components/NotificationModal';
 import { GoogleSheetModal } from './components/GoogleSheetModal';
-import { Download, Sparkles, AlertCircle, FileSpreadsheet, LogOut, LogIn } from 'lucide-react';
-
-import { auth, db } from './firebase';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
-import { collection, query, onSnapshot, setDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { Download, Sparkles, AlertCircle, FileSpreadsheet } from 'lucide-react';
 
 const SHEET_CONFIG_KEY = 'CHECKLIST_APP_SHEET_CONFIG_V1';
 
@@ -33,8 +29,6 @@ export default function App() {
     return INITIAL_TASKS;
   });
 
-  const [user, setUser] = useState<User | null>(null);
-  
   // Load Google Sheet Config
   const [sheetConfig, setSheetConfig] = useState<GoogleSheetConfig>(() => {
     try {
@@ -70,19 +64,24 @@ export default function App() {
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Real-time date reference to ensure deadlines update dynamically at midnight
+  const [currentDate, setCurrentDate] = useState(getTodayIsoDate());
+
+  useEffect(() => {
+    // Check every minute if the date has changed to trigger re-renders for overdue tasks
+    const interval = setInterval(() => {
+      const today = getTodayIsoDate();
+      setCurrentDate((prev) => (prev !== today ? today : prev));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Web Notification Permission
   const [webPermissionStatus, setWebPermissionStatus] = useState<NotificationPermission | 'unsupported'>(() => {
     return typeof window !== 'undefined' && 'Notification' in window
       ? Notification.permission
       : 'unsupported';
   });
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
 
   // Save tasks to LocalStorage whenever modified
   useEffect(() => {
@@ -108,11 +107,10 @@ export default function App() {
   // Generate Notifications based on task status
   const notifications = useMemo<SystemNotification[]>(() => {
     const list: SystemNotification[] = [];
-    const today = getTodayIsoDate();
 
     tasks.forEach((task) => {
       if (task.completed || task.dropped) return;
-      const metrics = calculateTaskMetrics(task, today);
+      const metrics = calculateTaskMetrics(task, currentDate);
 
       if (metrics.status === 'OVERDUE') {
         list.push({
@@ -138,7 +136,7 @@ export default function App() {
     });
 
     return list;
-  }, [tasks]);
+  }, [tasks, currentDate]);
 
   // Handle Web Notification Trigger
   const handleRequestWebPermission = () => {
@@ -232,7 +230,7 @@ export default function App() {
   // Filter & Search Logic
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
-      const metrics = calculateTaskMetrics(task);
+      const metrics = calculateTaskMetrics(task, currentDate);
 
       // Search Query
       if (filterState.searchQuery) {
@@ -276,7 +274,7 @@ export default function App() {
 
       return true;
     });
-  }, [tasks, filterState]);
+  }, [tasks, filterState, currentDate]);
 
   // Task Actions
   const handleCreateOrUpdateTask = (taskData: Omit<Task, 'id' | 'stt'> & { id?: string }) => {
@@ -351,7 +349,7 @@ export default function App() {
   // Export to Excel (.xlsx)
   const handleExportExcel = () => {
     const exportRows = filteredTasks.map((t, idx) => {
-      const metrics = calculateTaskMetrics(t);
+      const metrics = calculateTaskMetrics(t, currentDate);
       return {
         'STT': idx + 1,
         'Số hồ sơ / Dự án': t.project,
@@ -395,25 +393,12 @@ export default function App() {
               Checklist Manager
             </h1>
           </div>
-          <div>
-            {user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-slate-600">Xin chào, {user.displayName || user.email}</span>
-                <button onClick={() => signOut(auth)} className="text-xs flex items-center gap-1 text-rose-600 hover:text-rose-700 font-semibold px-2 py-1 rounded hover:bg-rose-50 transition cursor-pointer">
-                  <LogOut className="w-3.5 h-3.5" /> Đăng xuất
-                </button>
-              </div>
-            ) : (
-              <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())} className="text-xs flex items-center gap-1.5 text-white bg-blue-600 hover:bg-blue-700 font-semibold px-3 py-1.5 rounded-lg shadow-sm transition cursor-pointer">
-                <LogIn className="w-3.5 h-3.5" /> Đăng nhập bằng Google
-              </button>
-            )}
-          </div>
         </div>
 
         {/* Header Metric Summary Bar */}
         <HeaderStats
           tasks={tasks}
+          currentDate={currentDate}
           onOpenNewTaskModal={() => {
             setEditingTask(null);
             setIsTaskModalOpen(true);
@@ -462,6 +447,7 @@ export default function App() {
         {/* Main Task Data Table */}
         <TaskTable
           tasks={filteredTasks}
+          currentDate={currentDate}
           onToggleComplete={handleToggleComplete}
           onToggleDropped={handleToggleDropped}
           onEditTask={(task) => {

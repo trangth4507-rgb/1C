@@ -5,6 +5,7 @@ import { Edit2, Trash2, Check, AlertCircle, Ban, Paperclip, CheckSquare, Square 
 
 interface TaskTableProps {
   tasks: Task[];
+  currentDate: string;
   onToggleComplete: (taskId: string) => void;
   onToggleDropped: (taskId: string) => void;
   onEditTask: (task: Task) => void;
@@ -13,6 +14,7 @@ interface TaskTableProps {
 
 export const TaskTable: React.FC<TaskTableProps> = ({
   tasks,
+  currentDate,
   onToggleComplete,
   onToggleDropped,
   onEditTask,
@@ -55,7 +57,7 @@ export const TaskTable: React.FC<TaskTableProps> = ({
 
           <tbody className="divide-y divide-slate-200 text-xs">
             {tasks.map((task, index) => {
-              const metrics = calculateTaskMetrics(task);
+              const metrics = calculateTaskMetrics(task, currentDate);
 
               // Determine row background color based on rules:
               // 1. Overdue -> RED ROW (Quá hạn -> Tô màu đỏ)
